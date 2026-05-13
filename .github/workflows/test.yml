@@ -1,0 +1,97 @@
+name: Self-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Sign a fixture (no commit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate a throwaway keypair for the smoke test
+        run: |
+          set -euo pipefail
+          mkdir -p smoke
+          export LLMO_SKILL_DIR="$RUNNER_TEMP/llmo-skill-dropped"
+          export LLMO_ALLOW_OUT_OF_HOME=1
+          npm install -g llmo
+          cd smoke
+          llmo keygen --kid smoke-ci-2026 --jwks-path llmo-keys.json
+          test -f smoke-ci-2026.pem
+          test -f llmo-keys.json
+
+      - name: Build a Minimal-tier fixture
+        run: |
+          cat > smoke/llmo.json <<'JSON'
+          {
+            "llmo_version": "0.1",
+            "document_id": "smoke-ci-2026-001",
+            "valid_from": "2026-05-13T00:00:00Z",
+            "valid_until": "2026-08-11T00:00:00Z",
+            "entity": {
+              "name": "Smoke Test, Inc.",
+              "primary_domain": "smoke-test.example.com"
+            },
+            "claims": [
+              {
+                "claim_id": "homepage",
+                "type": "canonical_urls",
+                "statement": {
+                  "homepage": "https://smoke-test.example.com/"
+                }
+              }
+            ]
+          }
+          JSON
+
+      - name: Load private key into env (for composite-action 'with' input)
+        run: |
+          set -euo pipefail
+          {
+            echo 'SMOKE_KEY<<LLMO_PEM_EOF'
+            cat smoke/smoke-ci-2026.pem
+            echo 'LLMO_PEM_EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Run llmo-action in dry-run mode
+        id: action
+        uses: ./
+        with:
+          doc-path: smoke/llmo.json
+          key: ${{ env.SMOKE_KEY }}
+          kid: smoke-ci-2026
+          commit: 'false'
+
+      - name: Verify the action produced a signed doc
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.action.outputs.changed }}" != "true" ]; then
+            echo "::error::expected outputs.changed=true; got '${{ steps.action.outputs.changed }}'"
+            exit 1
+          fi
+          if ! jq -e 'has("signature")' < smoke/llmo.json > /dev/null; then
+            echo "::error::smoke/llmo.json is missing the top-level signature field after the action ran"
+            exit 1
+          fi
+          export LLMO_SKILL_DIR="$RUNNER_TEMP/llmo-skill-dropped"
+          export LLMO_ALLOW_OUT_OF_HOME=1
+          tier=$(llmo verify --no-kt-check --json smoke/llmo.json | jq -r '.tier')
+          if [ "$tier" = "invalid" ]; then
+            echo "::error::signed doc fails llmo verify: tier=$tier"
+            llmo verify --no-kt-check --json smoke/llmo.json
+            exit 1
+          fi
+          echo "smoke test passed: tier=$tier"
