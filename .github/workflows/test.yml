@@ -30,7 +30,7 @@ jobs:
           npm install -g llmo
           cd smoke
           llmo keygen --kid smoke-ci-2026 --jwks-path llmo-keys.json
-          test -f smoke-ci-2026.pem
+          test -f llmo-private-smoke-ci-2026.pem
           test -f llmo-keys.json
 
       - name: Build a Minimal-tier fixture
@@ -62,7 +62,7 @@ jobs:
           set -euo pipefail
           {
             echo 'SMOKE_KEY<<LLMO_PEM_EOF'
-            cat smoke/smoke-ci-2026.pem
+            cat smoke/llmo-private-smoke-ci-2026.pem
             echo 'LLMO_PEM_EOF'
           } >> "$GITHUB_ENV"
 
