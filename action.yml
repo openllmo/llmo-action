@@ -98,7 +98,12 @@ runs:
           --alg "$LLMO_ALG" \
           --in-place \
           "$LLMO_DOC_PATH"
-        if git diff --quiet -- "$LLMO_DOC_PATH"; then
+        # Detect whether the signed output differs from whatever is in
+        # the repo's working tree. `git status --porcelain` catches both
+        # modified tracked files and untracked-new files (the publisher's
+        # first-deploy case), where `git diff --quiet` would miss the
+        # untracked case and report "no diff" incorrectly.
+        if [ -z "$(git status --porcelain -- "$LLMO_DOC_PATH")" ]; then
           echo "llmo-action: re-sign produced no diff; nothing to commit"
           echo "changed=false" >> "$GITHUB_OUTPUT"
         else
